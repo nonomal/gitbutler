@@ -206,6 +206,7 @@ fn main() {
                     virtual_branches::commands::update_base_branch,
                     virtual_branches::commands::merge_virtual_branch_upstream,
                     virtual_branches::commands::update_virtual_branch,
+                    virtual_branches::commands::split_hunk_and_update_virtual_branch,
                     virtual_branches::commands::delete_virtual_branch,
                     virtual_branches::commands::apply_branch,
                     virtual_branches::commands::unapply_branch,
