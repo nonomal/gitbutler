@@ -3,6 +3,7 @@
 	import { SectionType } from '$lib/utils/fileSections';
 	import { createEventDispatcher } from 'svelte';
 	import type { Line } from '$lib/utils/fileSections';
+	import { writable } from 'svelte/store';
 
 	export let line: Line;
 	export let sectionType: SectionType;
@@ -13,6 +14,8 @@
 	export let readonly: boolean = false;
 	export let draggingDisabled: boolean = false;
 	export let tabSize = 4;
+	export let showSplitSelect = false;
+	export let selectedForSplit = writable<Boolean>(false);
 
 	const dispatch = createEventDispatcher<{ selected: boolean }>();
 
@@ -35,6 +38,9 @@
 		return tokens;
 	}
 
+	$: splitSelected = false;
+	$: selectedForSplit.set(splitSelected);
+
 	$: bgColor =
 		selectable && selected
 			? 'bg-blue-400 border-blue-500 text-white dark:border-blue-700 dark:bg-blue-800'
@@ -48,6 +54,11 @@
 	on:contextmenu|preventDefault
 >
 	<div class="code-line__numbers-line">
+		{#if showSplitSelect && !draggingDisabled && !readonly}
+			<div>
+				<input type="checkbox" name="select" bind:checked={splitSelected} />
+			</div>
+		{/if}
 		<button
 			on:click={() => selectable && dispatch('selected', !selected)}
 			class="text-color-4 border-color-4 shrink-0 select-none border-r px-0.5 text-right text-xs {bgColor}"
