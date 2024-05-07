@@ -18,6 +18,7 @@ use regex::Regex;
 use serde::Serialize;
 
 use super::integration::get_workspace_head;
+use super::split::SplitEntry;
 use super::{
     branch::{
         self, Branch, BranchCreateRequest, BranchId, BranchOwnershipClaims, Hunk, OwnershipClaim,
@@ -900,7 +901,10 @@ pub fn list_virtual_branches(
             .transpose()?
             .flatten();
 
-        let mut files = diffs_into_virtual_files(project_repository, files);
+        let files = diffs_into_virtual_files(project_repository, files);
+        let mut files = cull_unowned_splits(project_repository, branch.id, files)
+            .context("failed to cull unowned splits")?
+            .collect::<Vec<_>>();
 
         let path_claim_positions: HashMap<&PathBuf, usize> = branch
             .ownership
@@ -2109,6 +2113,137 @@ fn diffs_into_virtual_files(
     let hunks_by_filepath = virtual_hunks_by_git_hunks(&project_repository.project().path, diffs);
     virtual_hunks_into_virtual_files(project_repository, hunks_by_filepath)
 }
+
+fn cull_unowned_splits(
+    project_repository: &project_repository::Repository,
+    branch: BranchId,
+    files: impl IntoIterator<Item = VirtualBranchFile>,
+) -> Result<impl Iterator<Item = VirtualBranchFile>> {
+    let mut splits = project_repository.project().splits();
+    splits
+        .load()
+        .context("failed to load splits from database")?;
+
+    // TODO(qix-): Improve this so we can do a reverse lookup from the splits DB, rather
+    // TODO(qix-): than iterating over all files/hunks. This requires two things:
+    // TODO(qix-):   1. The splits DB needs to be able to do reverse lookups on the paths,
+    // TODO(qix-):      requiring that we handle path serialization correctly.
+    // TODO(qix-):   2. The Split DB needs to be properly garbage collected; as of writing,
+    // TODO(qix-):      it is not.
+    // TODO(qix-):
+    // TODO(qix-): Further, I'm using filter_map() here for convenience; there's almost definitely
+    // TODO(qix-): a more efficient way to do this rather than moving/copying/etc.
+    Ok(files.into_iter().filter_map(move |mut file| {
+        file.hunks = std::mem::take(&mut file.hunks)
+            .into_iter()
+            .filter_map(|mut hunk: VirtualBranchHunk| {
+                if let Some(split) = splits.get(&hunk.hash) {
+                    tracing::warn!("split found for hunk {:?}", hunk.hash);
+                    tracing::warn!("before: {:?}", hunk.diff);
+                    hunk.diff = hunk
+                        .diff
+                        .as_bytes()
+                        .iter()
+                        .copied()
+                        .cull_unowned_lines(branch, split)
+                        .collect();
+                    tracing::warn!("after: {:?}", hunk.diff);
+                }
+
+                if hunk.diff.is_empty() {
+                    None
+                } else {
+                    Some(hunk)
+                }
+            })
+            .collect();
+
+        if file.hunks.is_empty() {
+            None
+        } else {
+            Some(file)
+        }
+    }))
+}
+
+struct SplitCuller<'a, I>
+where
+    I: Iterator<Item = u8>,
+{
+    split: &'a SplitEntry,
+    branch: BranchId,
+    inner: I,
+    burn: bool,
+    is_nl: bool,
+    line: usize,
+}
+
+trait SplitCullerIter: Iterator<Item = u8> + Sized {
+    fn cull_unowned_lines(self, branch: BranchId, split: &SplitEntry) -> SplitCuller<'_, Self> {
+        SplitCuller {
+            split,
+            branch,
+            inner: self,
+            burn: false,
+            is_nl: true,
+            line: 0,
+        }
+    }
+}
+
+impl<'a, I> Iterator for SplitCuller<'a, I>
+where
+    I: Iterator<Item = u8>,
+{
+    type Item = u8;
+
+    fn next(&mut self) -> Option<u8> {
+        let b = self.inner.next()?;
+
+        if b == b'\n' {
+            self.burn = false;
+            self.is_nl = true;
+            return Some(b);
+        }
+
+        // Always emit the first line; it's a diff header.
+        if self.line == 0 {
+            return Some(b);
+        }
+
+        if self.burn {
+            // NOTE(qix-): ayyy
+            return None;
+        }
+
+        if self.is_nl {
+            self.is_nl = false;
+
+            // Not the first line, and we're at the start of a line.
+            // This character indicates the type of diff line.
+            // We never burn context lines, and don't increase
+            // the line number for them since the split DB only
+            // contains +/- lines.
+            if b != b' ' {
+                self.line += 1;
+                self.burn = self
+                    .split
+                    .ownership
+                    .get(self.line)
+                    .map_or(false, |s| *s != self.branch);
+                compile_error!("you done fucked up; you need to do the splitting during the raw -> file (virtual) hunk enumeration.")
+            }
+        }
+
+        if self.burn {
+            None
+        } else {
+            Some(b)
+        }
+    }
+}
+
+impl<T> SplitCullerIter for T where T: Iterator<Item = u8> + Sized {}
 
 // this function takes a list of file ownership,
 // constructs a tree from those changes on top of the target
