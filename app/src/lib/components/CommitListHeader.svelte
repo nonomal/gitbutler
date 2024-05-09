@@ -7,7 +7,6 @@
 	export let expanded: boolean;
 	export let type: CommitStatus;
 	export let height: number | undefined;
-	export let commitCount = 0;
 
 	let element: HTMLButtonElement | undefined = undefined;
 
@@ -19,12 +18,9 @@
 		{#if type == 'local'}
 			Local
 		{:else if type == 'remote'}
-			Remote branch
-		{:else if type == 'integrated'}
-			Integrated
+			Local and remote
 		{:else if type == 'upstream'}
-			{commitCount} upstream {commitCount == 1 ? 'commit' : 'commits'}
-			<Icon name="warning" color="warning" />
+			Remote upstream
 		{/if}
 	</div>
 	{#if isExpandable}

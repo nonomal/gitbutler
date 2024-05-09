@@ -1,17 +1,12 @@
 <script lang="ts">
 	import CommitList from './CommitList.svelte';
-	import {
-		getIntegratedCommits,
-		getLocalCommits,
-		getRemoteCommits,
-		getUnknownCommits
-	} from '$lib/vbranches/contexts';
+	import CommitListFooter from './CommitListFooter.svelte';
+	import { getLocalCommits, getRemoteCommits, getUnknownCommits } from '$lib/vbranches/contexts';
 
 	export let isUnapplied: boolean;
 
 	const localCommits = getLocalCommits();
 	const remoteCommits = getRemoteCommits();
-	const integratedCommits = getIntegratedCommits();
 	const unknownCommits = getUnknownCommits();
 </script>
 
@@ -20,4 +15,8 @@
 {/if}
 <CommitList {isUnapplied} type="local" commits={$localCommits} />
 <CommitList {isUnapplied} type="remote" commits={$remoteCommits} />
-<CommitList {isUnapplied} type="integrated" commits={$integratedCommits} />
+<CommitListFooter
+	type="local"
+	{isUnapplied}
+	hasCommits={$localCommits.length > 0 || $remoteCommits.length > 0}
+></CommitListFooter>

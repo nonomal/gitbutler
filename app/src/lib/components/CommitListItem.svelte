@@ -1,5 +1,6 @@
 <script lang="ts">
 	import CommitCard from './CommitCard.svelte';
+	import CommitChain from './CommitChain.svelte';
 	import DropzoneOverlay from './DropzoneOverlay.svelte';
 	import { Project } from '$lib/backend/projects';
 	import { DraggableCommit, DraggableFile, DraggableHunk } from '$lib/dragging/draggables';
@@ -18,8 +19,8 @@
 
 	export let commit: Commit | RemoteCommit;
 	export let isHeadCommit: boolean;
-	export let isChained: boolean;
 	export let isUnapplied = false;
+	export let hasShadowColumn = false;
 
 	const branchController = getContext(BranchController);
 	const baseBranch = getContextStore(BaseBranch);
@@ -107,10 +108,12 @@
 </script>
 
 <div class="commit-list-item">
-	{#if isChained}
-		<div class="line" />
-	{/if}
-	<div class="connector" />
+	<CommitChain
+		hasLocalColumn
+		{hasShadowColumn}
+		isFirst={!commit.parent}
+		isLast={!commit.children || commit.children.length == 0}
+	/>
 	<div
 		class="commit-card-wrapper"
 		use:dropzone={{
@@ -143,32 +146,12 @@
 <style>
 	.commit-list-item {
 		display: flex;
-		padding: 0 0 var(--size-6) var(--size-16);
 		position: relative;
 
 		&:last-child {
 			padding-bottom: 0;
 		}
 	}
-	.line {
-		position: absolute;
-		top: 0;
-		left: 0;
-		height: 100%;
-		width: 1px;
-		background-color: var(--clr-border-2);
-	}
-	.connector {
-		width: 1rem;
-		height: 1.125rem;
-		position: absolute;
-		top: 0;
-		left: 0;
-		border-bottom: 1px solid var(--clr-border-2);
-		border-left: 1px solid var(--clr-border-2);
-		border-radius: 0 0 0 0.5rem;
-	}
-
 	.commit-card-wrapper {
 		position: relative;
 		width: 100%;

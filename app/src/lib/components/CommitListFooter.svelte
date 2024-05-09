@@ -69,7 +69,7 @@
 </script>
 
 {#if !isUnapplied && type != 'integrated'}
-	<div class="actions" class:hasCommits>
+	<div class="actions" class:has-commits={hasCommits}>
 		{#if $prompt && type == 'local'}
 			<PassphraseBox prompt={$prompt} error={$promptError} />
 		{:else if githubService.isEnabled && (type == 'local' || type == 'remote')}
@@ -138,11 +138,14 @@
 {/if}
 
 <style lang="postcss">
-	.hasCommits {
-		padding-left: var(--size-16);
+	.actions {
+		background: var(--clr-bg-1);
+		padding: var(--size-16);
+		border-radius: 0 0 var(--radius-m) var(--radius-m);
+		border: 1px solid var(--clr-border-2);
 	}
 	.actions {
-		&:empty {
+		&:not(.has-commits) {
 			display: none;
 		}
 	}

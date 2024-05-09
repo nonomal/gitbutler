@@ -162,6 +162,7 @@ export class Commit {
 	files!: LocalFile[];
 	parentIds!: string[];
 	branchId!: string;
+	relatedTo?: RemoteCommit;
 
 	parent?: Commit;
 	children?: Commit[];
@@ -193,6 +194,10 @@ export class Commit {
 	}
 }
 
+export function isLocalCommit(obj: any): obj is Commit {
+	return obj instanceof Commit;
+}
+
 export class RemoteCommit {
 	id!: string;
 	author!: Author;
@@ -216,12 +221,24 @@ export class RemoteCommit {
 	}
 }
 
+export function isRemoteCommit(obj: any): obj is RemoteCommit {
+	return obj instanceof RemoteCommit;
+}
+
 export type AnyCommit = Commit | RemoteCommit;
 
 export const LOCAL_COMMITS = Symbol('LocalCommtis');
 export const REMOTE_COMMITS = Symbol('RemoteCommits');
 export const INTEGRATED_COMMITS = Symbol('IntegratedCommits');
 export const UNKNOWN_COMMITS = Symbol('UnknownCommits');
+
+export function commitCompare(left: AnyCommit, right: AnyCommit): boolean {
+	if (left.id != right.id) return true;
+	if (left.description != right.description) return false;
+	if (left.author.name != right.author.name) return false;
+	if (left.author.email != right.author.email) return false;
+	return true;
+}
 
 export class RemoteHunk {
 	diff!: string;
