@@ -163,6 +163,9 @@ export class Commit {
 	parentIds!: string[];
 	branchId!: string;
 
+	parent?: Commit;
+	children?: Commit[];
+
 	get isLocal() {
 		return !this.isRemote && !this.isIntegrated;
 	}
@@ -196,6 +199,9 @@ export class RemoteCommit {
 	description!: string;
 	@Transform((obj) => new Date(obj.value * 1000))
 	createdAt!: Date;
+
+	parent?: Commit;
+	children?: Commit[];
 
 	get isLocal() {
 		return false;
