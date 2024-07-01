@@ -1,10 +1,12 @@
+use std::path::PathBuf;
 use std::{fs, path, str::FromStr};
 
+use gitbutler_core::error::Marker;
 use gitbutler_core::{
     git,
     projects::{self, Project, ProjectId},
     users,
-    virtual_branches::{branch, errors, Controller},
+    virtual_branches::{branch, Controller},
 };
 use tempfile::TempDir;
 
@@ -50,13 +52,23 @@ impl Default for Test {
     }
 }
 
+impl Test {
+    /// Consume this instance and keep the temp directory that held the local repository, returning it.
+    /// Best used inside a `dbg!(test.debug_local_repo())`
+    #[allow(dead_code)]
+    pub fn debug_local_repo(mut self) -> PathBuf {
+        let repo = std::mem::take(&mut self.repository);
+        repo.debug_local_repo()
+    }
+}
+
 mod amend;
 mod apply_virtual_branch;
 mod cherry_pick;
 mod create_commit;
 mod create_virtual_branch_from_branch;
 mod delete_virtual_branch;
-mod fetch_from_target;
+mod fetch_from_remotes;
 mod init;
 mod insert_blank_commit;
 mod move_commit_file;
@@ -91,24 +103,26 @@ async fn resolve_conflict_flow() {
         let first_commit_oid = repository.commit_all("first");
         fs::write(repository.path().join("file.txt"), "second").unwrap();
         repository.commit_all("second");
+        fs::write(repository.path().join("third.txt"), "three").unwrap();
+        repository.commit_all("third");
         repository.push();
         repository.reset_hard(Some(first_commit_oid));
     }
 
     controller
-        .set_base_branch(project_id, &"refs/remotes/origin/master".parse().unwrap())
+        .set_base_branch(*project_id, &"refs/remotes/origin/master".parse().unwrap())
         .await
         .unwrap();
 
     let branch1_id = {
         // make a branch that conflicts with the remote branch, but doesn't know about it yet
         let branch1_id = controller
-            .create_virtual_branch(project_id, &branch::BranchCreateRequest::default())
+            .create_virtual_branch(*project_id, &branch::BranchCreateRequest::default())
             .await
             .unwrap();
         fs::write(repository.path().join("file.txt"), "conflict").unwrap();
 
-        let (branches, _) = controller.list_virtual_branches(project_id).await.unwrap();
+        let (branches, _) = controller.list_virtual_branches(*project_id).await.unwrap();
         assert_eq!(branches.len(), 1);
         assert_eq!(branches[0].id, branch1_id);
         assert!(branches[0].active);
@@ -118,10 +132,10 @@ async fn resolve_conflict_flow() {
 
     {
         // fetch remote
-        controller.update_base_branch(project_id).await.unwrap();
+        controller.update_base_branch(*project_id).await.unwrap();
 
         // there is a conflict now, so the branch should be inactive
-        let (branches, _) = controller.list_virtual_branches(project_id).await.unwrap();
+        let (branches, _) = controller.list_virtual_branches(*project_id).await.unwrap();
         assert_eq!(branches.len(), 1);
         assert_eq!(branches[0].id, branch1_id);
         assert!(!branches[0].active);
@@ -130,15 +144,16 @@ async fn resolve_conflict_flow() {
     {
         // when we apply conflicted branch, it has conflict
         controller
-            .apply_virtual_branch(project_id, &branch1_id)
+            .apply_virtual_branch(*project_id, branch1_id)
             .await
             .unwrap();
 
-        let (branches, _) = controller.list_virtual_branches(project_id).await.unwrap();
+        let (branches, _) = controller.list_virtual_branches(*project_id).await.unwrap();
         assert_eq!(branches.len(), 1);
         assert_eq!(branches[0].id, branch1_id);
         assert!(branches[0].active);
         assert!(branches[0].conflicted);
+        assert_eq!(branches[0].files.len(), 2); // third.txt should be present during conflict
 
         // and the conflict markers are in the file
         assert_eq!(
@@ -151,11 +166,11 @@ async fn resolve_conflict_flow() {
         // can't commit conflicts
         assert!(matches!(
             controller
-                .create_commit(project_id, &branch1_id, "commit conflicts", None, false)
+                .create_commit(*project_id, branch1_id, "commit conflicts", None, false)
                 .await
                 .unwrap_err()
                 .downcast_ref(),
-            Some(errors::CommitError::Conflicted(_))
+            Some(Marker::ProjectConflict)
         ));
     }
 
@@ -163,14 +178,14 @@ async fn resolve_conflict_flow() {
         // fixing the conflict removes conflicted mark
         fs::write(repository.path().join("file.txt"), "resolved").unwrap();
         let commit_oid = controller
-            .create_commit(project_id, &branch1_id, "resolution", None, false)
+            .create_commit(*project_id, branch1_id, "resolution", None, false)
             .await
             .unwrap();
 
         let commit = repository.find_commit(commit_oid).unwrap();
         assert_eq!(commit.parent_count(), 2);
 
-        let (branches, _) = controller.list_virtual_branches(project_id).await.unwrap();
+        let (branches, _) = controller.list_virtual_branches(*project_id).await.unwrap();
         assert_eq!(branches.len(), 1);
         assert_eq!(branches[0].id, branch1_id);
         assert!(branches[0].active);
