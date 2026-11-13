@@ -1,0 +1,17 @@
+//! Legacy data structures and functionality tied to `gitbutler-*` crates.
+
+pub mod absorb;
+pub mod askpass;
+pub mod cli;
+pub mod config;
+pub mod forge;
+pub mod git;
+pub mod modes;
+pub mod oplog;
+pub mod projects;
+pub mod repo;
+pub mod secret;
+pub mod settings;
+pub mod users;
+pub mod virtual_branches;
+pub mod workspace;

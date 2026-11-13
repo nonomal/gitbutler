@@ -4,25 +4,26 @@
 //! **Important Note:** This is an interim library. Please do not rely on it;
 //! it's only used as a temporary measure in the GitButler app until we implement
 //! a longer-term solution for managing Git operations.
-#![deny(missing_docs, unsafe_code)]
+#![deny(unsafe_code)]
 #![allow(async_fn_in_trait)]
-#![cfg_attr(test, feature(async_closure))]
-#![cfg_attr(windows, feature(windows_by_handle))]
-#![feature(impl_trait_in_assoc_type)]
+#![allow(unknown_lints)]
 
-#[cfg(all(not(debug_assertions), feature = "test-askpass-path"))]
-compile_error!("BUG: in production code this flag should not be set, nor do we run test with `cargo test --release`");
-
+#[cfg(feature = "tokio")]
+mod context;
 mod error;
-pub(crate) mod executor;
+pub mod executor;
 mod refspec;
 mod repository;
 
 #[cfg(feature = "tokio")]
+pub use self::context::{
+    GitContextExt, PushResult, fetch_with_askpass, prune_with_askpass, push_with_askpass,
+    remote_failure_reason,
+};
+#[cfg(feature = "tokio")]
 pub use self::executor::tokio;
-
 pub use self::{
     error::Error,
     refspec::{Error as RefSpecError, RefSpec},
-    repository::{fetch, push, sign_commit},
+    repository::{clone, fetch, prune, push},
 };

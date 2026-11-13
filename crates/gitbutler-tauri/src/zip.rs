@@ -1,54 +1,37 @@
-pub mod commands {
-    #![allow(clippy::used_underscore_binding)]
-    use anyhow::Context;
-    use std::path;
+#![allow(clippy::used_underscore_binding)]
+use std::path::PathBuf;
 
-    use gitbutler_core::error;
-    use gitbutler_core::error::Code;
-    use gitbutler_core::zip::controller;
-    use tauri::{AppHandle, Manager};
-    use tracing::instrument;
+use but_api::json::Error;
+use but_ctx::{Context, ProjectHandleOrLegacyProjectId};
+use tauri::State;
+use tracing::instrument;
 
-    use crate::error::Error;
+#[tauri::command(async)]
+#[instrument(skip(archival), err(Debug))]
+pub fn get_project_archive_path(
+    archival: State<'_, but_feedback::Archival>,
+    project_id: ProjectHandleOrLegacyProjectId,
+) -> Result<PathBuf, Error> {
+    archival
+        .zip_entire_repository(project_id)
+        .map_err(Into::into)
+}
 
-    #[tauri::command(async)]
-    #[instrument(skip(handle), err(Debug))]
-    pub async fn get_project_archive_path(
-        handle: AppHandle,
-        project_id: &str,
-    ) -> Result<path::PathBuf, Error> {
-        let project_id = project_id.parse().context(error::Context::new_static(
-            Code::Validation,
-            "Malformed project id",
-        ))?;
-        handle
-            .state::<controller::Controller>()
-            .archive(&project_id)
-            .map_err(Into::into)
-    }
+#[tauri::command(async)]
+#[instrument(skip(archival), err(Debug))]
+pub fn get_anonymous_graph_path(
+    archival: State<'_, but_feedback::Archival>,
+    project_id: ProjectHandleOrLegacyProjectId,
+) -> Result<PathBuf, Error> {
+    let ctx: Context = project_id.try_into()?;
+    let _guard = ctx.shared_worktree_access();
+    archival.zip_anonymous_graph(&ctx).map_err(Into::into)
+}
 
-    #[tauri::command(async)]
-    #[instrument(skip(handle), err(Debug))]
-    pub async fn get_project_data_archive_path(
-        handle: AppHandle,
-        project_id: &str,
-    ) -> Result<path::PathBuf, Error> {
-        let project_id = project_id.parse().context(error::Context::new_static(
-            Code::Validation,
-            "Malformed project id",
-        ))?;
-        handle
-            .state::<controller::Controller>()
-            .data_archive(&project_id)
-            .map_err(Into::into)
-    }
-
-    #[tauri::command(async)]
-    #[instrument(skip(handle), err(Debug))]
-    pub async fn get_logs_archive_path(handle: AppHandle) -> Result<path::PathBuf, Error> {
-        handle
-            .state::<controller::Controller>()
-            .logs_archive()
-            .map_err(Into::into)
-    }
+#[tauri::command(async)]
+#[instrument(skip(archival), err(Debug))]
+pub fn get_logs_archive_path(
+    archival: State<'_, but_feedback::Archival>,
+) -> Result<PathBuf, Error> {
+    archival.zip_logs().map_err(Into::into)
 }

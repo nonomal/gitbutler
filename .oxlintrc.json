@@ -1,0 +1,9 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"ignorePatterns": ["**/*", "!packages/but-ui-react/**/*", "packages/but-ui-react/scripts/**"],
+	"options": {
+		"typeAware": true,
+		"denyWarnings": true,
+		"reportUnusedDisableDirectives": "warn"
+	}
+}

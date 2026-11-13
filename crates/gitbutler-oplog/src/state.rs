@@ -1,0 +1,78 @@
+use std::{
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
+
+use anyhow::Result;
+use but_utils::read_toml_file_or_default;
+use serde::{Deserialize, Deserializer, Serialize};
+
+use super::OPLOG_FILE_NAME;
+
+/// SystemTime used to be serialized as u64 of seconds, but is now a proper SystemTime struct.
+/// This function will handle the old format gracefully.
+fn unfailing_system_time_deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(SystemTime::deserialize(deserializer).unwrap_or(SystemTime::UNIX_EPOCH))
+}
+
+fn unix_epoch() -> SystemTime {
+    SystemTime::UNIX_EPOCH
+}
+
+/// This tracks the head of the oplog, persisted in operations-log.toml.  
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Oplog {
+    #[serde(with = "but_serde::object_id_opt", default)]
+    pub head_sha: Option<gix::ObjectId>,
+    /// The time when the last snapshot was created. Seconds since Epoch
+    #[serde(
+        deserialize_with = "unfailing_system_time_deserialize",
+        default = "unix_epoch"
+    )]
+    pub modified_at: SystemTime,
+}
+
+impl Default for Oplog {
+    fn default() -> Self {
+        Self {
+            head_sha: None,
+            modified_at: SystemTime::UNIX_EPOCH,
+        }
+    }
+}
+
+pub(crate) struct OplogHandle {
+    file_path: PathBuf,
+}
+
+impl OplogHandle {
+    pub fn new(base_path: &Path) -> Self {
+        let file_path = base_path.join(OPLOG_FILE_NAME);
+        Self { file_path }
+    }
+
+    pub fn set_oplog_head(&self, sha: gix::ObjectId) -> Result<()> {
+        let mut oplog = self.read_file()?;
+        oplog.head_sha = Some(sha);
+        self.write_file(oplog)?;
+        Ok(())
+    }
+
+    pub fn oplog_head(&self) -> Result<Option<gix::ObjectId>> {
+        let oplog = self.read_file()?;
+        Ok(oplog.head_sha)
+    }
+
+    /// If the file does not exist, it will be created.
+    fn read_file(&self) -> Result<Oplog> {
+        read_toml_file_or_default(&self.file_path)
+    }
+
+    fn write_file(&self, mut oplog: Oplog) -> Result<()> {
+        oplog.modified_at = SystemTime::now();
+        but_utils::write(&self.file_path, toml::to_string(&oplog)?)
+    }
+}

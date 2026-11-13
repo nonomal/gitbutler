@@ -1,98 +1,50 @@
-use std::fmt::Display;
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
-use gitbutler_core::projects::ProjectId;
-use gitbutler_core::virtual_branches;
-
-/// An event for internal use, as merge between [super::file_monitor::Event] and [Action].
-#[derive(Debug)]
-pub(super) enum InternalEvent {
-    // From public action API
-    CalculateVirtualBranches(ProjectId),
-
-    // From file monitor
-    GitFilesChange(ProjectId, Vec<PathBuf>),
-    ProjectFilesChange(ProjectId, Vec<PathBuf>),
-}
-
-/// This type captures all operations that can be fed into a watcher that runs in the background.
-// TODO(ST): This should not have to be implemented in the Watcher, figure out how this can be moved
-//           to application logic at least. However, it's called through a trait in `core`.
-#[derive(Debug, PartialEq, Clone)]
-#[allow(missing_docs)]
-pub enum Action {
-    CalculateVirtualBranches(ProjectId),
-}
-
-impl Action {
-    /// Return the action's associated project id.
-    pub fn project_id(&self) -> ProjectId {
-        match self {
-            Action::CalculateVirtualBranches(project_id) => *project_id,
-        }
-    }
-}
-
-impl From<Action> for InternalEvent {
-    fn from(value: Action) -> Self {
-        match value {
-            Action::CalculateVirtualBranches(v) => InternalEvent::CalculateVirtualBranches(v),
-        }
-    }
-}
-
-impl Display for InternalEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            InternalEvent::GitFilesChange(project_id, paths) => {
-                write!(
-                    f,
-                    "GitFileChange({}, {})",
-                    project_id,
-                    comma_separated_paths(paths)
-                )
-            }
-            InternalEvent::ProjectFilesChange(project_id, paths) => {
-                write!(
-                    f,
-                    "ProjectFileChange({}, {})",
-                    project_id,
-                    comma_separated_paths(paths)
-                )
-            }
-            InternalEvent::CalculateVirtualBranches(pid) => write!(f, "VirtualBranch({})", pid),
-        }
-    }
-}
-
-fn comma_separated_paths(paths: &[PathBuf]) -> String {
-    const MAX_LISTING: usize = 5;
-    let listing = paths
-        .iter()
-        .take(MAX_LISTING)
-        .filter_map(|path| path.to_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let remaining = paths.len().saturating_sub(MAX_LISTING);
-    if remaining > 0 {
-        format!("{listing} […{remaining} more]")
-    } else {
-        listing
-    }
-}
+use but_ctx::ProjectHandleOrLegacyProjectId;
+use gitbutler_operating_modes::OperatingMode;
 
 /// An event telling the receiver something about the state of the application which just changed.
 #[derive(Debug, Clone)]
-#[allow(missing_docs)]
 pub enum Change {
-    GitFetch(ProjectId),
+    /// Emitted when a fetch updates the repository's fetched state.
+    GitFetch(ProjectHandleOrLegacyProjectId),
+    /// Emitted when HEAD changes its symbolic target or becomes attached or detached.
     GitHead {
-        project_id: ProjectId,
-        head: String,
+        project_id: ProjectHandleOrLegacyProjectId,
+        /// The symbolic ref HEAD points at, or `None` when HEAD is detached.
+        head: Option<String>,
+        operating_mode: OperatingMode,
     },
-    GitActivity(ProjectId),
-    VirtualBranches {
-        project_id: ProjectId,
-        virtual_branches: virtual_branches::VirtualBranches,
+    /// Emitted when the commit at the current HEAD changes.
+    GitActivity {
+        project_id: ProjectHandleOrLegacyProjectId,
+        head_sha: String,
+    },
+    /// Emitted when branches, remote-tracking state, or an external refresh may have changed which
+    /// commits and branches compose the GitButler workspace.
+    WorkspaceActivity {
+        project_id: ProjectHandleOrLegacyProjectId,
+    },
+    /// Emitted after worktree files or the index change. Carries freshly computed file diffs
+    /// together with hunk assignment and dependency information.
+    WorktreeChanges {
+        project_id: ProjectHandleOrLegacyProjectId,
+        changes: but_hunk_assignment::WorktreeChanges,
+        /// The paths of the files that changed.
+        ///
+        /// This will be empty if the index changed.
+        changed_paths: Arc<[PathBuf]>,
+    },
+    /// Emitted after the files or the index of a linked worktree change. Carries its freshly
+    /// computed file diffs, which have neither hunk assignments nor dependencies.
+    LinkedWorktreeChanges {
+        project_id: ProjectHandleOrLegacyProjectId,
+        /// The name of the linked worktree, i.e. its directory name under `$GIT_COMMON_DIR/worktrees/`.
+        worktree: String,
+        changes: but_hunk_assignment::WorktreeChanges,
+        /// The paths of the files that changed.
+        ///
+        /// This will be empty if the index changed.
+        changed_paths: Arc<[PathBuf]>,
     },
 }

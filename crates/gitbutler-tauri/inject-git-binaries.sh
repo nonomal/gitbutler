@@ -7,19 +7,30 @@ function log {
 }
 
 ROOT="$(dirname "$THIS")/../.."
-TARGET_ROOT="$ROOT/target/release"
+
+# Use CARGO_BUILD_TARGET if set, otherwise use rustc default triple
+if [ -n "${CARGO_BUILD_TARGET:-}" ]; then
+    TRIPLE="$CARGO_BUILD_TARGET"
+else
+    TRIPLE=${TRIPLE_OVERRIDE:-$(rustc --print host-tuple)}
+fi
+
+TARGET_ROOT="${CARGO_TARGET_DIR:-$ROOT/target}/${TRIPLE_OVERRIDE:-${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET}}/release"
 CRATE_ROOT="$ROOT/crates/gitbutler-tauri"
 
-if [ -f "$TARGET_ROOT/gitbutler-git-askpass" ] && [ -f "$TARGET_ROOT/gitbutler-git-setsid" ]; then
-    TRIPLE="$(rustc -vV | sed -n 's|host: ||p')"
+# BINARIES
+ASKPASS="gitbutler-git-askpass"
+BUT="but"
+
+if [ -f "$TARGET_ROOT/$ASKPASS.exe" ]; then
+    log injecting windows gitbutler-git binaries into crates/gitbutler-tauri "(TRIPLE=${TRIPLE})"
+    cp -v "$TARGET_ROOT/$ASKPASS.exe" "$CRATE_ROOT/$ASKPASS-${TRIPLE}.exe"
+    if [ -f "$TARGET_ROOT/$BUT.exe" ]; then
+      cp -v "$TARGET_ROOT/$BUT.exe" "$CRATE_ROOT/$BUT-${TRIPLE}.exe"
+    fi
+elif [ -f "$TARGET_ROOT/$ASKPASS" ]; then
     log injecting gitbutler-git binaries into crates/gitbutler-tauri "(TRIPLE=${TRIPLE})"
-    cp -v "$TARGET_ROOT/gitbutler-git-askpass" "$CRATE_ROOT/gitbutler-git-askpass-${TRIPLE}"
-    cp -v "$TARGET_ROOT/gitbutler-git-setsid" "$CRATE_ROOT/gitbutler-git-setsid-${TRIPLE}"
-elif [ -f "$TARGET_ROOT/gitbutler-git-askpass.exe" ] && [ -f "$TARGET_ROOT/gitbutler-git-setsid.exe" ]; then
-    TRIPLE="$(rustc.exe -vV | sed -n 's|host: ||p')"
-    log injecting gitbutler-git binaries into crates/gitbutler-tauri "(TRIPLE=${TRIPLE})"
-    cp -v "$TARGET_ROOT/gitbutler-git-askpass.exe" "$CRATE_ROOT/gitbutler-git-askpass-${TRIPLE}.exe"
-    cp -v "$TARGET_ROOT/gitbutler-git-setsid.exe" "$CRATE_ROOT/gitbutler-git-setsid-${TRIPLE}.exe"
+    cp -v "$TARGET_ROOT/$ASKPASS" "$CRATE_ROOT/$ASKPASS-${TRIPLE}"
 else
     log gitbutler-git binaries are not built
     exit 1

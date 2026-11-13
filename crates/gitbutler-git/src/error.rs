@@ -7,7 +7,6 @@ pub enum Error<BE: std::error::Error + core::fmt::Debug + Send + Sync + 'static>
     /// executing the operation itself.
     #[error("backend error: {0}")]
     Backend(#[from] BE),
-    /// The given refspec was not found.
     /// Usually returned by a push or fetch operation.
     #[error("a ref-spec was not found: {0}")]
     RefNotFound(String),
@@ -19,12 +18,20 @@ pub enum Error<BE: std::error::Error + core::fmt::Debug + Send + Sync + 'static>
     /// more context.
     #[error("authorization failed: {0}")]
     AuthorizationFailed(BE),
-    /// An operation interacting with a remote by name failed to find
-    /// the remote.
     #[error("no such remote: {0}")]
     NoSuchRemote(String, #[source] BE),
-    /// An operation that expected a remote not to exist found that
-    /// the remote already existed.
+    /// An operation interacting with a Gerrit remote found that there
+    /// were no new changes to process.
+    #[error("no new changes: {0}")]
+    GerritNoNewChanges(BE),
     #[error("remote already exists: {0}")]
     RemoteExists(String, #[source] BE),
+    #[error(
+        "the force push was blocked because the remote branch contains commits that would be overwritten"
+    )]
+    ForcePushProtection(BE),
+    /// A push was rejected because it would not be a fast-forward — the remote branch moved and
+    /// contains commits the local side does not. Recoverable by re-fetching and retrying.
+    #[error("the push was rejected because the remote branch has moved (non-fast-forward)")]
+    NonFastForward(BE),
 }

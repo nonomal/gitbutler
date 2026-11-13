@@ -1,5 +1,9 @@
-#![feature(error_generic_member_access)]
-#![cfg_attr(windows, feature(windows_by_handle))]
+//! # Feature Flags
+#![cfg_attr(
+    not(feature = "document-features"),
+    doc = "Activate the `document-features` cargo feature to see feature docs here, i.e. `cargo doc -p gitbutler-tauri --features document-features`"
+)]
+#![cfg_attr(feature = "document-features", doc = document_features::document_features!())]
 #![cfg_attr(
     all(windows, not(test), not(debug_assertions)),
     windows_subsystem = "windows"
@@ -13,19 +17,18 @@
     clippy::too_many_lines
 )]
 
-pub mod app;
-pub mod commands;
-
 pub mod logs;
 pub mod menu;
-pub mod watcher;
+pub mod window;
+pub use window::state::{WindowState, event::ChangeForFrontend};
 
 pub mod askpass;
-pub mod error;
-pub mod github;
-pub mod keys;
+pub mod debug;
 pub mod projects;
-pub mod undo;
-pub mod users;
-pub mod virtual_branches;
+
+pub mod settings;
 pub mod zip;
+
+pub mod env;
+
+pub mod csp;

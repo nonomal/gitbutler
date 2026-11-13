@@ -1,14 +1,15 @@
-use crate::executor::{AskpassServer, FileStat, Pid, Socket, Uid};
 use std::{
     fs::Permissions,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::Path,
-    time::Duration,
 };
+
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufStream},
     net::{UnixListener, UnixStream},
 };
+
+use crate::executor::{AskpassServer, FileStat, Pid, Socket, Uid};
 
 impl Socket for BufStream<UnixStream> {
     type Error = std::io::Error;
@@ -18,8 +19,7 @@ impl Socket for BufStream<UnixStream> {
             .peer_cred()
             .unwrap()
             .pid()
-            .ok_or(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            .ok_or(std::io::Error::other(
                 "no pid available for peer connection",
             ))
     }
@@ -31,6 +31,8 @@ impl Socket for BufStream<UnixStream> {
     async fn read_line(&mut self) -> Result<String, Self::Error> {
         let mut buf = String::new();
         <Self as AsyncBufReadExt>::read_line(self, &mut buf).await?;
+        // TODO: use an array of `char`
+        #[expect(clippy::manual_pattern_char_comparison)]
         Ok(buf.trim_end_matches(|c| c == '\r' || c == '\n').into())
     }
 
@@ -42,7 +44,6 @@ impl Socket for BufStream<UnixStream> {
     }
 }
 
-/// A tokio-based askpass server implementation.
 pub struct TokioAskpassServer {
     // Always Some until dropped.
     server: Option<UnixListener>,
@@ -69,14 +70,13 @@ impl AskpassServer for TokioAskpassServer {
     type Error = std::io::Error;
     type SocketHandle = BufStream<UnixStream>;
 
-    async fn accept(&self, timeout: Option<Duration>) -> Result<Self::SocketHandle, Self::Error> {
-        let res = if let Some(timeout) = timeout {
-            tokio::time::timeout(timeout, self.server.as_ref().unwrap().accept()).await?
-        } else {
-            self.server.as_ref().unwrap().accept().await
-        };
-
-        res.map(|(s, _)| BufStream::new(s))
+    async fn accept(&self) -> Result<Self::SocketHandle, Self::Error> {
+        self.server
+            .as_ref()
+            .unwrap()
+            .accept()
+            .await
+            .map(|(s, _)| BufStream::new(s))
     }
 }
 

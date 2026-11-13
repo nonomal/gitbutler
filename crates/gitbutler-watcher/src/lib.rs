@@ -1,54 +1,43 @@
 //! Implement the file-monitoring agent that informs about changes in interesting locations.
-#![deny(unsafe_code, rust_2018_idioms)]
+#![deny(unsafe_code)]
 #![allow(clippy::doc_markdown, clippy::missing_errors_doc)]
-#![feature(slice_as_chunks)]
-
-mod events;
-use events::InternalEvent;
-pub use events::{Action, Change};
-
-mod file_monitor;
-mod handler;
-pub use handler::Handler;
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
-use gitbutler_core::projects::ProjectId;
-use tokio::{
-    sync::mpsc::{unbounded_channel, UnboundedSender},
-    task,
-};
+use anyhow::Result;
+use but_ctx::{Context, ProjectHandleOrLegacyProjectId};
+use but_settings::AppSettingsWithDiskSync;
+pub use handler::Handler;
+use tokio::{sync::mpsc::unbounded_channel, task};
 use tokio_util::sync::CancellationToken;
 
-/// An abstraction over a link to the spawned watcher, which runs in the background.
+mod events;
+
+pub use events::Change;
+use gitbutler_filemonitor::{FileMonitorHandle, InternalEvent, LinkedWorktree};
+
+mod handler;
+
+pub use gitbutler_filemonitor::WatchMode;
+
 pub struct WatcherHandle {
-    /// A way to post events and interact with the actual handler in the background.
-    tx: UnboundedSender<InternalEvent>,
-    /// The id of the project we are watching.
-    project_id: ProjectId,
-    /// A way to tell the background process to stop handling events.
+    /// Must be dropped synchronously so disconnecting its command channel unblocks
+    /// `BlockingPool::shutdown` during Tokio runtime teardown.
+    file_monitor: FileMonitorHandle,
+    /// A way to tell the async event-dispatch task to stop.
     cancellation_token: CancellationToken,
 }
 
 impl Drop for WatcherHandle {
     fn drop(&mut self) {
         self.cancellation_token.cancel();
+        // file_monitor drops here, disconnecting cmd_rx and unblocking the spawn_blocking task.
     }
 }
 
 impl WatcherHandle {
-    /// Post an `action` for the watcher to perform.
-    pub async fn post(&self, action: Action) -> Result<()> {
-        self.tx
-            .send(action.into())
-            .context("failed to send event")?;
-        Ok(())
-    }
-
-    /// Return the id of the project we are watching.
-    pub fn project_id(&self) -> ProjectId {
-        self.project_id
+    pub fn flush(&self) -> Result<()> {
+        self.file_monitor.flush()
     }
 }
 
@@ -69,38 +58,48 @@ impl WatcherHandle {
 /// was changed to what it is now, which should be much less wasteful.
 pub fn watch_in_background(
     handler: handler::Handler,
-    path: impl AsRef<Path>,
-    project_id: ProjectId,
+    worktree_path: impl AsRef<Path>,
+    project_id: ProjectHandleOrLegacyProjectId,
+    app_settings: AppSettingsWithDiskSync,
+    watch_mode: WatchMode,
 ) -> Result<WatcherHandle, anyhow::Error> {
     let (events_out, mut events_in) = unbounded_channel();
 
-    file_monitor::spawn(project_id, path.as_ref(), events_out.clone())?;
+    let file_monitor = gitbutler_filemonitor::spawn(
+        project_id.clone(),
+        worktree_path.as_ref(),
+        {
+            let project_id = project_id.clone();
+            move || active_linked_worktrees(project_id.clone())
+        },
+        events_out,
+        watch_mode,
+    )?;
 
     let cancellation_token = CancellationToken::new();
     let handle = WatcherHandle {
-        tx: events_out,
-        project_id,
+        file_monitor,
         cancellation_token: cancellation_token.clone(),
     };
-    let handle_event = move |event: InternalEvent| -> Result<()> {
-        let handler = handler.clone();
-        // NOTE: Traditional parallelization (blocking) is required as `tokio::spawn()` on
-        //       the `handler.handle()` future isn't `Send` as it keeps non-Send things
-        //       across await points. Further, there is a fair share of `sync` IO happening
-        //       as well, so nothing can really be done here.
-        task::spawn_blocking(move || {
-            futures::executor::block_on(async move {
-                handler.handle(event).await.ok();
+    let handle_event =
+        move |event: InternalEvent, app_settings: AppSettingsWithDiskSync| -> Result<()> {
+            let handler = handler.clone();
+            // NOTE: Traditional parallelization (blocking) is required as `tokio::spawn()` on
+            //       the `handler.handle()` future isn't `Send` as it keeps non-Send things
+            //       across await points. Further, there is a fair share of `sync` IO happening
+            //       as well, so nothing can really be done here.
+            task::spawn_blocking(move || {
+                handler.handle(event, app_settings).ok();
             });
-        });
-        Ok(())
-    };
+            Ok(())
+        };
 
     tokio::spawn(async move {
         loop {
             tokio::select! {
-                Some(event) = events_in.recv() => handle_event(event)?,
+                Some(event) = events_in.recv() => handle_event(event, app_settings.clone())?,
                 () = cancellation_token.cancelled() => {
+                    tracing::debug!(%project_id, "stopped watcher");
                     break;
                 }
             }
@@ -109,4 +108,19 @@ pub fn watch_in_background(
     });
 
     Ok(handle)
+}
+
+fn active_linked_worktrees(
+    project_id: ProjectHandleOrLegacyProjectId,
+) -> Result<Vec<LinkedWorktree>> {
+    let ctx: Context = project_id.try_into()?;
+    Ok(ctx
+        .worktrees_with_state()?
+        .into_iter()
+        .filter(|worktree| !worktree.archived)
+        .map(|worktree| LinkedWorktree {
+            name: worktree.name,
+            workdir: worktree.path,
+        })
+        .collect())
 }

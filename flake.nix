@@ -1,70 +1,90 @@
 {
+  description = "GitButler development environment";
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Keep the browsers aligned with Playwright in pnpm-lock.yaml (1.58.2).
+    nixpkgs-playwright.url = "github:NixOS/nixpkgs/7f6a6fb1c76e09426d6125e7e2543efe2a7f74e3";
     flake-utils.url = "github:numtide/flake-utils";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        flake-utils.follows = "flake-utils";
-      };
-    };
+    rust-overlay.url = "github:oxalica/rust-overlay";
   };
-  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
-    flake-utils.lib.eachDefaultSystem
-      (system:
-        let
-          overlays = [ (import rust-overlay) ];
-          pkgs = import nixpkgs {
-            inherit system overlays;
+
+  outputs = {
+    self,
+    nixpkgs,
+    nixpkgs-playwright,
+    flake-utils,
+    rust-overlay,
+  }:
+    flake-utils.lib.eachDefaultSystem (system: let
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [(import rust-overlay)];
+      };
+
+      playwrightBrowsers = nixpkgs-playwright.legacyPackages.${system}.playwright-driver.browsers;
+      rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+
+      # libghostty-vt-sys (via but-tty) builds libghostty-vt with Zig 0.17.x.
+      # On macOS that build runs Apple tools (`xcrun nmedit`) the Nix SDK lacks,
+      # so Zig gets the system toolchain instead, like libghostty-rs's own shell.
+      zig =
+        if pkgs.stdenv.hostPlatform.isDarwin
+        then
+          pkgs.writeShellScriptBin "zig" ''
+            unset SDKROOT DEVELOPER_DIR
+            PATH=$(echo "$PATH" | tr ':' '\n' | grep -v xcbuild | paste -sd: -)
+            exec ${pkgs.zig_0_17}/bin/zig "$@"
+          ''
+        else pkgs.zig_0_17;
+
+      # Nix's cc links with nixpkgs' ld64, which links the GPUI client 2.4x slower than the
+      # linker Xcode and the Command Line Tools ship, so Cargo links with that one when it's
+      # installed. Nix's ld wrapper is bypassed, so its library search paths are passed on.
+      cargoLinker = pkgs.writeShellScript "cargo-linker" ''
+        if ld=$(env -u DEVELOPER_DIR -u SDKROOT /usr/bin/xcode-select -p >/dev/null 2>&1 &&
+          env -u DEVELOPER_DIR -u SDKROOT /usr/bin/xcrun --find ld 2>/dev/null); then
+          exec ${pkgs.stdenv.cc}/bin/cc --ld-path="$ld" "$@" $NIX_LDFLAGS
+        fi
+        exec ${pkgs.stdenv.cc}/bin/cc "$@"
+      '';
+    in {
+      devShells.default = pkgs.mkShell {
+        packages = [
+          rustToolchain
+          pkgs.rust-analyzer
+          pkgs.cargo-nextest
+          pkgs.cargo-deny
+          pkgs.cmake
+          pkgs.curl
+          pkgs.file
+          pkgs.git
+          pkgs.pkg-config
+          pkgs.wget
+          pkgs.nodejs_24
+          pkgs.pnpm
+          playwrightBrowsers
+          pkgs.cargo-flamegraph
+          pkgs.cargo-machete
+          zig
+        ];
+
+        env =
+          {
+            RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+            "CARGO_TARGET_${pkgs.stdenv.hostPlatform.rust.cargoEnvVarTarget}_LINKER" = "${cargoLinker}";
           };
 
-          rustToolchain = pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        shellHook = ''
+          # if we don't set TS_RS_EXPORT_DIR then `cargo test --all-features`
+          # generates ts files and dirties the working copy
+          export TS_RS_EXPORT_DIR="''${TMPDIR:-/tmp}/gitbutler-ts-rs"
+          mkdir -p "$TS_RS_EXPORT_DIR"
 
-          common = with pkgs; [
-            gtk3
-            glib
-            glib-networking
-            dbus
-            openssl_3
-            librsvg
-            gettext
-            libiconv
-            libsoup_3
-            webkitgtk
-            nodejs_20
-            nodePackages.pnpm
-          ];
-
-          # runtime Deps
-          libraries = with pkgs;[
-            cairo
-            pango
-            harfbuzz
-            gdk-pixbuf
-          ] ++ common;
-
-          # compile-time deps
-          packages = with pkgs; [
-            curl
-            wget
-            pkg-config
-            rustToolchain
-          ] ++ common;
-        in
-        with pkgs;
-        {
-          devShells.default = mkShell {
-            nativeBuildInputs = packages;
-            buildInputs = libraries;
-
-            shellHook =
-              ''
-                export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libraries}:$LD_LIBRARY_PATH
-                export XDG_DATA_DIRS=${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}:$XDG_DATA_DIRS
-                export GIO_MODULE_DIR="${pkgs.glib-networking}/lib/gio/modules/"
-              '';
-          };
-        }
-      );
+          export PLAYWRIGHT_BROWSERS_PATH=${playwrightBrowsers}
+        '';
+      };
+    });
 }

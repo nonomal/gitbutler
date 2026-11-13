@@ -1,8 +1,9 @@
 [package]
 name = "gitbutler-git"
 version = "0.0.0"
-edition = "2021"
+edition.workspace = true
 publish = false
+rust-version.workspace = true
 
 [lib]
 path = "src/lib.rs"
@@ -13,43 +14,57 @@ name = "gitbutler-git-askpass"
 path = "src/bin/askpass.rs"
 test = false
 
-[[bin]]
-name = "gitbutler-git-setsid"
-path = "src/bin/setsid.rs"
-test = false
-
 [features]
-default = ["serde", "tokio"]
-serde = ["dep:serde"]
+default = ["tokio"]
 tokio = ["dep:tokio"]
-## a flag that is needed for integration tests that run this code to work.
-test-askpass-path = []
+## a flag to indicate benchmarks are run
+benches = []
+## a flag to turn on the askpass machinery for Git commands (should be enabled for GUI, disabled for CLI)
+askpass = []
 
 [dependencies]
+but-askpass.workspace = true
+but-core.workspace = true
+but-ctx.workspace = true
+but-error.workspace = true
+tracing.workspace = true
 thiserror.workspace = true
-serde = { workspace = true, optional = true }
+anyhow.workspace = true
 tokio = { workspace = true, optional = true, features = [
-  "process",
-  "time",
-  "io-util",
-  "net",
-  "fs",
+    "process",
+    "time",
+    "io-util",
+    "net",
+    "fs",
+    "rt-multi-thread",
 ] }
-uuid = { workspace = true, features = ["v4", "fast-rng"] }
-rand = "0.8.5"
-futures = "0.3.30"
-sysinfo = "0.30.11"
+rand.workspace = true
+futures.workspace = true
+sysinfo = { workspace = true, features = ["system"] }
+gix.workspace = true
+serde.workspace = true
 
 [target."cfg(unix)".dependencies]
-nix = { version = "0.28.0", features = ["process", "socket", "user"] }
+nix = { workspace = true, features = ["process", "socket", "user"] }
 
 [target."cfg(windows)".dependencies]
-winapi = { version = "0.3.9", features = ["winbase", "namedpipeapi"] }
-tokio = { workspace = true, optional = true, features = ["sync"] }
-# synchronous named pipes for the askpass utility
-windows-named-pipe = "0.1.0"
+windows = { version = "0.62.0", features = [
+    "Win32",
+    "Win32_System",
+    "Win32_System_Pipes",
+    "Win32_Storage",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_System_IO",
+    "Win32_System_Threading",
+] }
+tokio = { workspace = true, optional = true, features = ["sync", "rt"] }
+file-id.workspace = true
 
-[lints.clippy]
-all = "deny"
-perf = "deny"
-correctness = "deny"
+[dev-dependencies]
+but-testsupport.workspace = true
+snapbox.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true
